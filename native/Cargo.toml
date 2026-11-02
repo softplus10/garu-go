@@ -1,6 +1,6 @@
 [package]
 name = "garu-go-ffi"
-version = "0.9.16"
+version = "0.9.17"
 edition = "2021"
 license = "Apache-2.0"
 
