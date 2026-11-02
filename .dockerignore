@@ -2,3 +2,4 @@
 native/target
 dist
 **/__pycache__
+upstream/.git

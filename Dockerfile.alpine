@@ -3,8 +3,11 @@ FROM rust:alpine AS native
 RUN apk add --no-cache build-base
 WORKDIR /src
 COPY native/ native/
-COPY third_party/ third_party/
-RUN sh -c 'cargo build --locked --release --manifest-path native/Cargo.toml'
+COPY upstream/ upstream/
+RUN cargo build --locked --release --manifest-path native/Cargo.toml
+RUN mkdir -p /notices/models && cp upstream/LICENSE /notices/LICENSE && \
+    cp -R upstream/js/models/. /notices/models/ && rm /notices/models/base.gmdl && \
+    if [ -f upstream/NOTICE ]; then cp upstream/NOTICE /notices/NOTICE; fi
 
 FROM golang:1.23-alpine AS test
 RUN apk add --no-cache build-base
@@ -17,4 +20,5 @@ RUN go test ./... && go build -o /garu-search ./examples/search && /garu-search
 FROM alpine:3.22 AS example
 RUN apk add --no-cache libgcc
 COPY --from=test /garu-search /usr/local/bin/garu-search
+COPY --from=native /notices/ /usr/local/share/garu/
 CMD ["garu-search"]

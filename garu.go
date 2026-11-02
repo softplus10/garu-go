@@ -12,7 +12,6 @@ package garu
 import "C"
 
 import (
-	"embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,9 +20,6 @@ import (
 	"unicode/utf8"
 	"unsafe"
 )
-
-//go:embed models/base.gmdl
-var models embed.FS
 
 // ErrClosed is returned after Close or on an uninitialized Analyzer.
 var ErrClosed = errors.New("garu: analyzer is closed")
@@ -58,23 +54,23 @@ type Analyzer struct {
 	ptr unsafe.Pointer
 }
 
-// New loads the unmodified model bundled with this upstream version.
+// New loads the upstream model embedded in the native library.
 func New(options ...Options) (*Analyzer, error) {
-	data, err := models.ReadFile("models/base.gmdl")
-	if err != nil {
-		return nil, err
-	}
-	return NewWithModel(data, options...)
+	return newAnalyzer(nil, options...)
 }
 
 // NewWithModel loads caller-supplied model bytes. The native core owns the parsed
 // data after this call, so the input slice can be released or reused.
 func NewWithModel(model []byte, options ...Options) (*Analyzer, error) {
-	if len(options) > 1 {
-		return nil, errors.New("garu: at most one Options value is supported")
-	}
 	if len(model) == 0 {
 		return nil, errors.New("garu: model is empty")
+	}
+	return newAnalyzer(model, options...)
+}
+
+func newAnalyzer(model []byte, options ...Options) (*Analyzer, error) {
+	if len(options) > 1 {
+		return nil, errors.New("garu: at most one Options value is supported")
 	}
 	nativeVersion := C.GoString(C.garu_go_version())
 	if nativeVersion != Version {
@@ -85,7 +81,12 @@ func NewWithModel(model []byte, options ...Options) (*Analyzer, error) {
 		normalize = 1
 	}
 	var message *C.char
-	ptr := C.garu_go_new((*C.uchar)(unsafe.Pointer(unsafe.SliceData(model))), C.size_t(len(model)), normalize, &message)
+	var ptr unsafe.Pointer
+	if model == nil {
+		ptr = C.garu_go_new_default(normalize, &message)
+	} else {
+		ptr = C.garu_go_new((*C.uchar)(unsafe.Pointer(unsafe.SliceData(model))), C.size_t(len(model)), normalize, &message)
+	}
 	runtime.KeepAlive(model)
 	if message != nil {
 		defer C.garu_go_string_free(message)

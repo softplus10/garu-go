@@ -2,6 +2,7 @@ package garu
 
 import (
 	"errors"
+	"os"
 	"reflect"
 	"sync"
 	"testing"
@@ -119,7 +120,7 @@ func TestConcurrentClose(t *testing.T) {
 }
 
 func TestCustomModelOwnsInput(t *testing.T) {
-	data, err := models.ReadFile("models/base.gmdl")
+	data, err := os.ReadFile("upstream/js/models/base.gmdl")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -8,7 +8,7 @@ The Rust analyzer and bundled model are **unmodified**. This package adds a smal
 Requires Go 1.23+, Rust stable, a C toolchain, and `CGO_ENABLED=1`.
 
 ```sh
-git clone https://github.com/softplus10/garu-go.git
+git clone --recurse-submodules https://github.com/softplus10/garu-go.git
 cd garu-go
 sh scripts/build-native.sh
 go test ./...
@@ -17,18 +17,20 @@ go run ./examples/search
 
 On Debian/Ubuntu install `build-essential`; on Alpine install `build-base`. Rust must also be installed in the build environment.
 The Rust static library is linked into the Go executable. Rust/Cargo are **build-time** tools, not running services.
-The model is embedded in the Go package; startup does not download anything.
+The model is embedded in the Rust static library directly from the pinned submodule; startup does not download anything.
+
+For an existing checkout, initialize the exact pinned revision with `git submodule update --init --recursive`. The build script reports this command if the submodule is missing.
 
 ### Use from another Go project
 
 First build and install the matching native library into a prefix you control:
 
 ```sh
-# In the garu-go checkout, at the same tag as the Go dependency:
+# In the garu-go checkout, at the same revision as the Go dependency:
 sh scripts/install-native.sh "$HOME/.local"
 
 # In your application:
-go get github.com/softplus10/garu-go@v0.12.1
+go get github.com/softplus10/garu-go@main
 CGO_ENABLED=1 CGO_LDFLAGS="-L$HOME/.local/lib" go build ./...
 ```
 
@@ -88,21 +90,41 @@ docker run --rm garu-go-alpine
 
 PocketBase can keep an analyzer in memory and call `Nouns` from Go routes. This repository supplies the analyzer binding only, not the student encoder or search ranking API.
 
-## Upstream versions
+## Upstream submodule and versions
 
-Go version tags follow upstream Garu version tags. Each tag pins the matching Rust source, default model and model notices.
-`upstream.json` records the upstream commit and model SHA-256. Upstream files are vendored so ordinary builds do not clone another repository.
-An existing search encoder should use the same Garu version and model used in training, rather than silently upgrading to latest.
+```text
+garu-go/
+├── upstream/       # ongjin/garu Git submodule, pinned to one commit
+├── native/         # C ABI adapter; depends on upstream/crates/garu-core
+├── garu.go         # Go API
+└── pos.go          # constants generated from upstream Sejong POS tags
+```
 
-To prepare another version:
+There are no copied engine or model directories. The native build uses the core and
+`js/models/base.gmdl` directly from `upstream/`. The submodule gitlink records the
+upstream commit; `Version` and `UpstreamCommit` expose that identity to Go callers.
+CI checks out submodules recursively. Docker builds use the already initialized
+submodule from the build context.
+
+Updating is explicit; ordinary clones/builds do not follow upstream's latest branch:
 
 ```sh
 python3 scripts/sync-upstream.py v0.12.1
 sh scripts/build-native.sh
 go test -race ./...
+# Review and commit the submodule pointer and generated version/POS metadata.
 ```
 
-The manual **Sync upstream tag** GitHub workflow runs these checks plus npm parity, then pushes an `upstream/vX.Y.Z` branch for review. After merging a tested version, publish the same `vX.Y.Z` tag. Tags are not moved or overwritten. A wrapper-only correction can use `vX.Y.Z-go.1` while keeping `Version` at the upstream version.
+The sync script checks out the exact requested tag and updates binding metadata;
+it does not copy or modify upstream files. It refuses a dirty upstream checkout.
+The manual **Sync upstream tag** workflow tests the change against the matching
+npm package and pushes an `upstream/vX.Y.Z` branch for review.
+
+Go version tags follow upstream Garu version tags. Existing `v0.12.1` and `v0.9.14`
+tags are immutable snapshots from before the submodule conversion. Use `main` for
+the submodule layout, building the native library from the same checkout/revision.
+Future version tags will use this layout; existing tags are not moved or overwritten.
+An existing search encoder should keep the Garu version/model used in training.
 
 ## Verification
 
@@ -121,5 +143,9 @@ CI checks Linux, macOS and Alpine. Parity covers Korean search phrases, English 
 
 ## License
 
-Wrapper code: Apache-2.0. Garu engine: upstream Apache-2.0, with notices retained in `third_party/garu/`.
-Bundled dictionary/model data retains its original licenses and attribution; see [`models/NOTICE.md`](models/NOTICE.md), `models/licenses/`, and model provenance files. No model data is relicensed by this wrapper.
+Wrapper code: Apache-2.0. Garu engine and model licensing are retained in the
+upstream submodule: `upstream/LICENSE`, `upstream/NOTICE` (where present), and
+`upstream/js/models/` notices, source licenses and provenance. No model data is
+relicensed by this wrapper. Include the applicable notices when distributing a
+compiled native library or executable; the Alpine example image carries them in
+`/usr/local/share/garu/`.

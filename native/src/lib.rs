@@ -49,6 +49,15 @@ fn failure(message: &str) -> *mut c_char {
 pub extern "C" fn garu_go_version() -> *const c_char {
     concat!(env!("CARGO_PKG_VERSION"), "\0").as_ptr().cast()
 }
+/// Embed the model directly from the pinned submodule at native build time.
+#[no_mangle]
+pub unsafe extern "C" fn garu_go_new_default(
+    normalize_jamo: i32,
+    error: *mut *mut c_char,
+) -> *mut c_void {
+    let model = include_bytes!("../../upstream/js/models/base.gmdl");
+    garu_go_new(model.as_ptr(), model.len(), normalize_jamo, error)
+}
 /// The caller supplies readable model bytes for this call only. The parsed analyzer owns its data.
 #[no_mangle]
 pub unsafe extern "C" fn garu_go_new(
