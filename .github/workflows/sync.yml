@@ -8,7 +8,6 @@ on:
         type: string
 permissions:
   contents: write
-  pull-requests: write
 jobs:
   sync:
     runs-on: ubuntu-24.04
@@ -31,7 +30,7 @@ jobs:
           npm install --prefix "$RUNNER_TEMP/parity" --ignore-scripts "garu-ko@${UPSTREAM_TAG#v}"
           go build -o "$RUNNER_TEMP/garu-parity" ./cmd/parity
           node scripts/check-parity.mjs "$RUNNER_TEMP/parity/node_modules/garu-ko" "$RUNNER_TEMP/garu-parity"
-      - name: Open tested version update for review
+      - name: Push tested version branch for review
         env:
           GH_TOKEN: ${{ github.token }}
           UPSTREAM_TAG: ${{ inputs.tag }}
@@ -43,4 +42,4 @@ jobs:
           git add README.md third_party models native/Cargo.toml native/Cargo.lock upstream.json version.go pos.go
           git commit -m "Sync upstream Garu $UPSTREAM_TAG"
           git push origin "upstream/$UPSTREAM_TAG"
-          gh pr create --title "Sync Garu $UPSTREAM_TAG" --body 'Vendors the exact upstream Rust core and model; native tests and npm parity checks passed. After merge, tag this commit with the matching upstream version.'
+          echo "Tested branch: upstream/$UPSTREAM_TAG. Review and merge it, then create the matching version tag." >> "$GITHUB_STEP_SUMMARY"

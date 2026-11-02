@@ -102,7 +102,7 @@ sh scripts/build-native.sh
 go test -race ./...
 ```
 
-The manual **Sync upstream tag** GitHub workflow runs these checks plus npm parity, then opens a version-update PR. After merging a tested version, publish the same `vX.Y.Z` tag. Tags are not moved or overwritten. A wrapper-only correction can use `vX.Y.Z-go.1` while keeping `Version` at the upstream version.
+The manual **Sync upstream tag** GitHub workflow runs these checks plus npm parity, then pushes an `upstream/vX.Y.Z` branch for review. After merging a tested version, publish the same `vX.Y.Z` tag. Tags are not moved or overwritten. A wrapper-only correction can use `vX.Y.Z-go.1` while keeping `Version` at the upstream version.
 
 ## Verification
 
