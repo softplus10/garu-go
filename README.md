@@ -144,7 +144,7 @@ go build -o /tmp/garu-parity-cli ./cmd/parity
 node scripts/check-parity.mjs /tmp/garu-parity/node_modules/garu-ko /tmp/garu-parity-cli
 ```
 
-CI checks Linux, macOS and Alpine. Parity covers Korean search phrases, English SL tokens, spacing, empty input, emoji and embedded NUL.
+CI checks Linux, macOS and Alpine. Parity covers Korean search phrases, English SL tokens, spacing, empty input, emoji and embedded NUL. If a historical npm distribution contains a WASM binary that cannot compile, the check reports that limitation and compares against an independent executable using the exact upstream Rust core instead. Other npm runtime errors and result mismatches still fail the check.
 
 ## License
 
