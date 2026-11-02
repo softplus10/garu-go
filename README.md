@@ -120,11 +120,16 @@ it does not copy or modify upstream files. It refuses a dirty upstream checkout.
 The manual **Sync upstream tag** workflow tests the change against the matching
 npm package and pushes an `upstream/vX.Y.Z` branch for review.
 
-Go version tags follow upstream Garu version tags. Existing `v0.12.1` and `v0.9.14`
-tags are immutable snapshots from before the submodule conversion. Use `main` for
-the submodule layout, building the native library from the same checkout/revision.
-Future version tags will use this layout; existing tags are not moved or overwritten.
-An existing search encoder should keep the Garu version/model used in training.
+Go version tags follow upstream Garu version tags. All published versions from
+`v0.9.14` through `v0.12.1` use this submodule layout, each pinning its matching
+upstream source and model. Build the native library from the same tag/revision as
+the Go dependency. An existing search encoder should keep the Garu version/model
+used in training.
+
+During this migration, the original `v0.9.14` and `v0.12.1` tags were rewritten.
+Go module proxies/checksum databases can retain their previous contents; rewriting
+Git tags cannot invalidate those caches. Consumers affected by that history should
+use a new immutable version or a commit/pseudo-version.
 
 ## Verification
 
