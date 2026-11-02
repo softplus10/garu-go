@@ -1,0 +1,46 @@
+name: Sync upstream tag
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Exact upstream tag (e.g. v0.12.1)'
+        required: true
+        type: string
+permissions:
+  contents: write
+  pull-requests: write
+jobs:
+  sync:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Sync unmodified source and test
+        env:
+          UPSTREAM_TAG: ${{ inputs.tag }}
+        run: |
+          python3 scripts/sync-upstream.py "$UPSTREAM_TAG"
+          sh scripts/build-native.sh
+          go test -race ./...
+          npm install --prefix "$RUNNER_TEMP/parity" --ignore-scripts "garu-ko@${UPSTREAM_TAG#v}"
+          go build -o "$RUNNER_TEMP/garu-parity" ./cmd/parity
+          node scripts/check-parity.mjs "$RUNNER_TEMP/parity/node_modules/garu-ko" "$RUNNER_TEMP/garu-parity"
+      - name: Open tested version update for review
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPSTREAM_TAG: ${{ inputs.tag }}
+        run: |
+          git diff --quiet && exit 0
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git switch -c "upstream/$UPSTREAM_TAG"
+          git add README.md third_party models native/Cargo.toml native/Cargo.lock upstream.json version.go pos.go
+          git commit -m "Sync upstream Garu $UPSTREAM_TAG"
+          git push origin "upstream/$UPSTREAM_TAG"
+          gh pr create --title "Sync Garu $UPSTREAM_TAG" --body 'Vendors the exact upstream Rust core and model; native tests and npm parity checks passed. After merge, tag this commit with the matching upstream version.'

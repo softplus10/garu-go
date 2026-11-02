@@ -1,0 +1,40 @@
+name: Test bindings
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native:
+    strategy:
+      matrix:
+        os: [ubuntu-24.04, macos-14]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: sh scripts/build-native.sh
+      - run: go test -race ./...
+      - run: go vet ./...
+      - name: Compare with matching upstream npm package
+        shell: bash
+        run: |
+          version=$(node -p 'JSON.parse(require("fs").readFileSync("upstream.json")).tag.slice(1)')
+          npm install --prefix "$RUNNER_TEMP/parity" --ignore-scripts "garu-ko@$version"
+          go build -o "$RUNNER_TEMP/garu-parity" ./cmd/parity
+          node scripts/check-parity.mjs "$RUNNER_TEMP/parity/node_modules/garu-ko" "$RUNNER_TEMP/garu-parity"
+  alpine:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -f Dockerfile.alpine -t garu-go-alpine .
+      - run: docker run --rm garu-go-alpine

@@ -1,0 +1,9 @@
+garu-go
+Copyright 2026 softplus10
+
+Go bindings and a C ABI adapter for Garu by Yongjin Cho.
+The upstream Rust core in third_party/garu-core and the model in models/base.gmdl
+are redistributed without modification from the tag recorded in upstream.json.
+Upstream engine notices: third_party/garu/NOTICE and third_party/garu/LICENSE.
+Model data notices and source licenses: models/NOTICE.md, models/licenses/,
+and the provenance files in models/. These data licenses are unchanged.

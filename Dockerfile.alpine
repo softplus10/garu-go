@@ -1,0 +1,20 @@
+# Native Rust and Go must target the same libc. This builds both against musl.
+FROM rust:alpine AS native
+RUN apk add --no-cache build-base
+WORKDIR /src
+COPY native/ native/
+COPY third_party/ third_party/
+RUN sh -c 'cargo build --locked --release --manifest-path native/Cargo.toml'
+
+FROM golang:1.23-alpine AS test
+RUN apk add --no-cache build-base
+WORKDIR /src
+COPY . .
+COPY --from=native /src/native/target/release/libgaru_go.a /usr/local/lib/libgaru_go.a
+ENV CGO_ENABLED=1
+RUN go test ./... && go build -o /garu-search ./examples/search && /garu-search
+
+FROM alpine:3.22 AS example
+RUN apk add --no-cache libgcc
+COPY --from=test /garu-search /usr/local/bin/garu-search
+CMD ["garu-search"]

@@ -1,0 +1,1158 @@
+use garu_core::model::Analyzer;
+use garu_core::types::Pos;
+
+fn load_analyzer() -> Analyzer {
+    let model_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../models/codebook.gmdl");
+    let model_data = std::fs::read(model_path).expect("Failed to read model");
+    Analyzer::from_bytes(&model_data).expect("Failed to load analyzer")
+}
+
+#[test]
+fn test_curated_domain_lexemes_are_not_oversegmented() {
+    let analyzer = load_analyzer();
+    let cases = [
+        ("나이아신아마이드를 함유했다", "나이아신아마이드", Pos::NNG),
+        ("세라마이드와 판테놀", "세라마이드", Pos::NNG),
+        ("가브리살을 구웠다", "가브리살", Pos::NNG),
+        ("에픽테토스가 말했다", "에픽테토스", Pos::NNP),
+        ("글램핑을 예약했다", "글램핑", Pos::NNG),
+        ("브라이트닝에 적합하다", "브라이트닝", Pos::NNG),
+        ("프롤레타리아트와 부르주아지", "프롤레타리아트", Pos::NNG),
+        ("아스타잔틴을 함유했다", "아스타잔틴", Pos::NNG),
+        ("호모시스테인 수치", "호모시스테인", Pos::NNG),
+        ("디지털 트랜스포메이션을 추진한다", "트랜스포메이션", Pos::NNG),
+        ("작품의 오리지널리티", "오리지널리티", Pos::NNG),
+        ("라미네이트를 사용했다", "라미네이트", Pos::NNG),
+        ("하버마스의 저서", "하버마스", Pos::NNP),
+        ("카라바조의 그림", "카라바조", Pos::NNP),
+        ("무인양품에서 샀다", "무인양품", Pos::NNP),
+        ("텔레마코스의 모험", "텔레마코스", Pos::NNP),
+        ("에라토스테네스가 계산했다", "에라토스테네스", Pos::NNP),
+        ("테이레시아스의 예언", "테이레시아스", Pos::NNP),
+        ("포카리스웨트를 마셨다", "포카리스웨트", Pos::NNP),
+        ("헤스페리데스의 정원", "헤스페리데스", Pos::NNP),
+    ];
+    let mut failures = Vec::new();
+    for (input, word, pos) in cases {
+        let result = analyzer.analyze(input);
+        if !result.tokens.iter().any(|token| token.text == word && token.pos == pos) {
+            failures.push((input, word, pos, result.tokens));
+        }
+    }
+    assert!(failures.is_empty(), "domain lexemes were split or mistagged: {failures:?}");
+}
+
+#[test]
+fn test_lexical_research_words() {
+    let analyzer = load_analyzer();
+    let cases = [
+        ("토크나이저의 원리를 설명했다", "토크나이저", Pos::NNG),
+        ("테아닌을 첨가했다", "테아닌", Pos::NNG),
+        ("레티날과 세라마이드", "레티날", Pos::NNG),
+        ("레스베라트롤을 함유했다", "레스베라트롤", Pos::NNG),
+        ("사금파리가 흩어졌다", "사금파리", Pos::NNG),
+        ("맥루헌의 저서", "맥루헌", Pos::NNP),
+        ("말라르메의 시", "말라르메", Pos::NNP),
+        ("인페인팅으로 복원했다", "인페인팅", Pos::NNG),
+        ("커큐민과 크레아틴", "커큐민", Pos::NNG),
+        ("커큐민과 크레아틴", "크레아틴", Pos::NNG),
+        ("뇨키를 먹었다", "뇨키", Pos::NNG),
+    ];
+    let mut failures = Vec::new();
+    for (input, word, pos) in cases {
+        let result = analyzer.analyze(input);
+        if !result.tokens.iter().any(|token| token.text == word && token.pos == pos) {
+            failures.push((input, word, pos, result.tokens));
+        }
+    }
+    assert!(failures.is_empty(), "lexical regression: {failures:?}");
+}
+
+#[test]
+fn test_lexical_context_kept() {
+    let analyzer = load_analyzer();
+    let time = analyzer.analyze("아롱사태를 채소와 함께 와인으로 오랜 시간 끓인 비프스튜로, 치아바타빵과 같이 나옵니다");
+    assert!(time.tokens.iter().any(|t| t.text == "시간" && t.pos == Pos::NNG));
+
+    let copula = analyzer.analyze("한국에서 만들어서 판매하는 두바이 초콜릿은 대부분 수제 카다이프면이다. 그래서 온라인상에서 말이 많기는 했다.");
+    assert!(copula.tokens.iter().any(|t| t.text == "이" && t.pos == Pos::VCP));
+
+    let name = analyzer.analyze("고리키가 『어머니』를 쓰던 당시 러시아 문학은 톨스토이, 도스토예프스키, 투르게네프 등이 추구하던 사실주의가 주류였다. 그러나 고리키는 사실주의와 민족주의적 작품에서 벗어나 거친 삶을 대변하는 프롤레타리아 문학을 창조해 냈다. 이후 고리키는 러시아 혁명을 지지해 1932년 소련 작가 동맹 의장으로 취임하였다.");
+    // Preserve the name boundary without freezing the baseline's imperfect noun tag.
+    assert!(name.tokens.iter().any(|t| {
+        t.text == "투르게네프" && matches!(t.pos, Pos::NNG | Pos::NNP)
+    }));
+
+    let prefix = "이와 더불어 프리바이오틱스 ";
+    let input = format!("{prefix}와 12종 유산균사균체까지 함께 있는데 이 프로바이오틱스와 프리바이오틱스의 결합이 신바이오틱스 다. 유산균과 유산균의 먹이를 함께 배합해 유산균이 장 내에서 잘 증식하도록 하는 것이 목적이다.");
+    let particle = analyzer.analyze(&input);
+    assert!(particle.tokens.iter().any(|t| {
+        t.text == "와" && t.pos == Pos::JC && t.start == prefix.chars().count()
+    }));
+
+    let genitive = analyzer.analyze("레티놀의 장점만을 살린 저자극 대체 원료 ‘바쿠치올’ 함유!");
+    assert!(genitive.tokens.iter().any(|t| t.text == "의" && t.pos == Pos::JKG));
+}
+
+#[test]
+fn test_more_lexical_words() {
+    let analyzer = load_analyzer();
+    let cases = [
+        ("나르시시스트를 피했다", "나르시시스트", Pos::NNG),
+        ("하이드로겔 시트를 붙였다", "하이드로겔", Pos::NNG),
+        ("코르티솔의 변화", "코르티솔", Pos::NNG),
+        ("트립토판을 분석했다", "트립토판", Pos::NNG),
+        ("비오틴과 나이아신", "비오틴", Pos::NNG),
+        ("에어프라이어를 사용했다", "에어프라이어", Pos::NNG),
+        ("인코텀즈를 확인했다", "인코텀즈", Pos::NNG),
+        ("스타인벡의 소설", "스타인벡", Pos::NNP),
+        ("탕후루를 먹었다", "탕후루", Pos::NNG),
+        ("나이아신과 나이아신아마이드를 구분한다", "나이아신", Pos::NNG),
+        ("나이아신과 나이아신아마이드를 구분한다", "나이아신아마이드", Pos::NNG),
+    ];
+    let mut failures = Vec::new();
+    for (text, word, pos) in cases {
+        let result = analyzer.analyze(text);
+        if !result.tokens.iter().any(|t| t.text == word && t.pos == pos) {
+            failures.push((text, word, pos, result.tokens));
+        }
+    }
+    assert!(failures.is_empty(), "lexical expansion regression: {failures:?}");
+}
+
+#[test]
+fn test_lexical_followup_context() {
+    let analyzer = load_analyzer();
+    let invoice = analyzer.analyze("• 수출입신고: 국가는 물건도 왜 이것이 우리나라를 들어오고 나가는지를 알려고 하는데(통관), 이때 수입자 혹은 수출자는 인보이스(Invoice), 패킹리스트(Packing List) 등의 서류를 제출해 수출입신고를 합니다.");
+    assert!(invoice.tokens.windows(2).any(|p| {
+        p[0].text == "자" && p[0].pos == Pos::NNG && p[1].text == "는" && p[1].pos == Pos::JX
+    }));
+
+    let decorating = analyzer.analyze("제가 최근에 침실 데스크테리어 꾸미기에 한창입니다.");
+    assert!(decorating.tokens.windows(2).any(|p| {
+        p[0].text == "기" && p[0].pos == Pos::ETN && p[1].text == "에" && p[1].pos == Pos::JKB
+    }));
+
+    let medicine = analyzer.analyze("2) BUN 수치가 낮을 때는 요소회로(urea cycle)를 활성화해서 암모니아 배설을 촉진하면 좋으므로 아르기닌, 시트룰린, 아스파라긴산, 오르니틴 등의 제제가 도움이 될 것입니다. 그리고 간 해독에 필요한 실리마린 제제나 간의 2상 대사를 잘 돌려주는 아미노산 제제도 도움이 됩니다.");
+    assert!(medicine.tokens.windows(2).any(|p| {
+        p[0].text == "제제" && p[0].pos == Pos::NNG && p[1].text == "나" && p[1].pos == Pos::JC
+    }));
+
+    let footwear = analyzer.analyze("2층으로 올라가면 크록스 뿐만 아니라 일반 의류, 휴양지 의류 제품들도 있으니 관심 있으신 분들은 2층도 잊지 마시고 둘러보시길 바랍니다.^^");
+    assert!(footwear.tokens.iter().any(|t| t.text == "뿐" && t.pos == Pos::JX));
+}
+
+#[test]
+fn test_bulk_words() {
+    let analyzer = load_analyzer();
+    let cases = [
+        ("오마카세를 먹었다.", "오마카세", "를", Pos::JKO),
+        ("홀로그램을 보았다.", "홀로그램", "을", Pos::JKO),
+        ("모슬린 천을 샀다.", "모슬린", "천", Pos::NNG),
+        ("아샷추를 마셨다.", "아샷추", "를", Pos::JKO),
+        ("펫시팅을 맡겼다.", "펫시팅", "을", Pos::JKO),
+        ("맥시멀리스트의 방이다.", "맥시멀리스트", "의", Pos::JKG),
+    ];
+    for (input, noun, next, next_pos) in cases {
+        let result = analyzer.analyze(input);
+        assert!(result.tokens.windows(2).any(|pair| {
+            pair[0].text == noun && pair[0].pos == Pos::NNG
+                && pair[1].text == next && pair[1].pos == next_pos
+        }), "{input}: {:?}", result.tokens);
+    }
+}
+
+#[test]
+fn test_bulk_context() {
+    let analyzer = load_analyzer();
+    let predicate = analyzer.analyze("외국으로 나가기 전에 준비했다.");
+    assert!(predicate.tokens.windows(2).any(|pair| {
+        pair[0].text == "나가" && pair[0].pos == Pos::VV
+            && pair[1].text == "기" && pair[1].pos == Pos::ETN
+    }));
+
+    let longer = analyzer.analyze("겨드랑이가 아프다.");
+    assert!(longer.tokens.windows(2).any(|pair| {
+        pair[0].text == "겨드랑이" && pair[0].pos == Pos::NNG
+            && pair[1].text == "가" && pair[1].pos == Pos::JKS
+    }));
+}
+
+#[test]
+fn test_codebook_analyzer_v3() {
+    let analyzer = load_analyzer();
+
+    // Basic analysis
+    let result = analyzer.analyze("나는 학교에서 공부했다");
+    println!("\n=== Codebook v3 ===");
+    println!("Input: 나는 학교에서 공부했다");
+    for token in &result.tokens {
+        println!("  {} {:?} [{}:{}]", token.text, token.pos, token.start, token.end);
+    }
+    assert!(!result.tokens.is_empty(), "Should produce tokens");
+
+    // Contracted verbs
+    let result2 = analyzer.analyze("했다");
+    println!("\n했다 tokens:");
+    for token in &result2.tokens {
+        println!("  {} {:?}", token.text, token.pos);
+    }
+    assert!(!result2.tokens.is_empty());
+
+    // Empty string
+    let empty = analyzer.analyze("");
+    assert!(empty.tokens.is_empty());
+
+    // English/mixed text
+    let result3 = analyzer.analyze("TypeScript는 좋다");
+    println!("\nTypeScript는 좋다:");
+    for token in &result3.tokens {
+        println!("  {} {:?} [{}:{}]", token.text, token.pos, token.start, token.end);
+    }
+    assert!(!result3.tokens.is_empty());
+
+    // Tokenize
+    let tokens = analyzer.tokenize("서울에서 공부했다");
+    println!("\nTokenize: {:?}", tokens);
+    assert!(!tokens.is_empty());
+
+    // Conjugation tests: jongseong split + vowel contraction
+    let conjugation_cases: Vec<(&str, Vec<&str>)> = vec![
+        ("고친다", vec!["고치", "ㄴ다"]),
+        ("소 잃고 외양간 고친다", vec!["소", "잃", "고", "외양간", "고치", "ㄴ다"]),
+        ("건너라", vec!["건너", "어라"]),
+        ("가라", vec!["가", "아라"]),
+    ];
+    for (input, expected) in &conjugation_cases {
+        let r = analyzer.analyze(input);
+        println!("\n{input}:");
+        for t in &r.tokens { println!("  {}\t{:?}", t.text, t.pos); }
+        let got: Vec<&str> = r.tokens.iter().map(|t| t.text.as_str()).collect();
+        assert_eq!(got, *expected, "Mismatch for '{input}'");
+    }
+
+    // XSV/XSA disambiguation tests
+    let xsa_cases = [
+        "어제 늦게까지 공부했더니 피곤하다",
+        "피곤한 하루",
+        "공부하는 학생",
+    ];
+    for input in &xsa_cases {
+        let r = analyzer.analyze(input);
+        println!("\n{input}:");
+        for t in &r.tokens { println!("  {}\t{:?}", t.text, t.pos); }
+    }
+}
+
+#[test]
+fn test_cnn2_ensemble() {
+    let analyzer = load_analyzer();
+
+    // Test: "나는 하늘을 나는 새를 보았다"
+    let r = analyzer.analyze("나는 하늘을 나는 새를 보았다");
+    println!("\n나는 하늘을 나는 새를 보았다:");
+    for t in &r.tokens { println!("  {}\t{:?}", t.text, t.pos); }
+    assert_eq!(r.tokens[0].text, "나");
+    assert_eq!(r.tokens[0].pos, garu_core::types::Pos::NP);
+
+    // Test: 피곤하다
+    let r2 = analyzer.analyze("피곤하다");
+    println!("\n피곤하다:");
+    for t in &r2.tokens { println!("  {}\t{:?}", t.text, t.pos); }
+
+    // Test: 공부하는 학생
+    let r3 = analyzer.analyze("공부하는 학생");
+    println!("\n공부하는 학생:");
+    for t in &r3.tokens { println!("  {}\t{:?}", t.text, t.pos); }
+}
+
+fn assert_analysis(analyzer: &Analyzer, input: &str, expected: &[(&str, Pos)]) {
+    let result = analyzer.analyze(input);
+    let got: Vec<(&str, Pos)> = result
+        .tokens
+        .iter()
+        .map(|token| (token.text.as_str(), token.pos))
+        .collect();
+    assert_eq!(got, expected, "analysis mismatch for '{input}'");
+}
+
+#[test]
+fn test_dependency_noun_constructions() {
+    let analyzer = load_analyzer();
+
+    // '갈수있는데'는 아래 #[ignore] 테스트로 분리 (재순위 wrong-override).
+
+    assert_analysis(
+        &analyzer,
+        "올만한데",
+        &[
+            ("오", Pos::VV),
+            ("ㄹ", Pos::ETM),
+            ("만", Pos::NNB),
+            ("하", Pos::XSA),
+            ("ㄴ데", Pos::EC),
+        ],
+    );
+
+    assert_analysis(
+        &analyzer,
+        "볼만하다",
+        &[
+            ("보", Pos::VV),
+            ("ㄹ", Pos::ETM),
+            ("만", Pos::NNB),
+            ("하", Pos::XSA),
+            ("다", Pos::EF),
+        ],
+    );
+
+    assert_analysis(
+        &analyzer,
+        "갈만해",
+        &[
+            ("가", Pos::VV),
+            ("ㄹ", Pos::ETM),
+            ("만", Pos::NNB),
+            ("하", Pos::XSA),
+            ("아", Pos::EF),
+        ],
+    );
+
+    assert_analysis(
+        &analyzer,
+        "들만한데",
+        &[
+            ("들", Pos::VV),
+            ("ㄹ", Pos::ETM),
+            ("만", Pos::NNB),
+            ("하", Pos::XSA),
+            ("ㄴ데", Pos::EC),
+        ],
+    );
+
+}
+
+// 재순위 perceptron이 rank1(정답)을 갈리/VV로 뒤집는 wrong-override 케이스.
+// 이 플립 클래스(기능어→content 병합)는 v15k 전체로는 순이익(+1.75 문장F1,
+// improved 14 vs worsened 6)이라 가드 차단은 순손실 — 개별 케이스는 재순위
+// 재학습에서 해결 대상 (research-history #37). Section 14 없는 모델에선 통과.
+#[test]
+#[ignore = "재순위 wrong-override 잔존 케이스 — 재학습 시 해결 (research-history #37)"]
+fn test_dependency_noun_ri_rerank_tradeoff() {
+    let analyzer = load_analyzer();
+
+    assert_analysis(
+        &analyzer,
+        "갈리없는데",
+        &[
+            ("가", Pos::VV),
+            ("ㄹ", Pos::ETM),
+            ("리", Pos::NNB),
+            ("없", Pos::VA),
+            ("는데", Pos::EC),
+        ],
+    );
+}
+
+// 무공백 `갈`+의존명사. 0.9.13에서 재순위가 갈/VV+수/EC를 골라 `#[ignore]`였으나,
+// 새 사전 반영 재순위 재학습(research-history #49)으로 해결되어 다시 활성화.
+// Section 18 탐색 비용(#79)이 띄어 쓴 학습 자료의 어절 경계 feature로 `가+ㄹ` 아크에 벌점을 줘
+// 다시 갈/VV+수/EC가 된다. 게이트 v2를 통과한 모델을 사용자 결정으로 채택하며 알려진 회귀로 둔다.
+#[test]
+#[ignore = "Section 18 known regression (research-history #79)"]
+fn test_dependency_noun_su_rerank_tradeoff() {
+    let analyzer = load_analyzer();
+
+    assert_analysis(
+        &analyzer,
+        "갈수있는데",
+        &[
+            ("가", Pos::VV),
+            ("ㄹ", Pos::ETM),
+            ("수", Pos::NNB),
+            ("있", Pos::VX),
+            ("는데", Pos::EC),
+        ],
+    );
+}
+
+#[test]
+fn test_nbest_path_applies_determiner_postprocess() {
+    let analyzer = load_analyzer();
+    let result = analyzer.analyze("검찰은 방 전 사장을 조만간 피의자 신분으로 소환해 조사할 방침이다.");
+
+    let window = result
+        .tokens
+        .windows(3)
+        .find(|tokens| tokens[0].text == "방" && tokens[1].text == "전" && tokens[2].text == "사장")
+        .expect("expected 방 전 사장 window");
+
+    assert_eq!(window[1].pos, Pos::MM);
+}
+
+#[test]
+fn test_contextual_reranking_everyday_and_sns() {
+    let analyzer = load_analyzer();
+
+    assert_analysis(
+        &analyzer,
+        "오늘 점심 뭐 먹을까?",
+        &[
+            ("오늘", Pos::MAG),
+            ("점심", Pos::NNG),
+            ("뭐", Pos::NP),
+            ("먹", Pos::VV),
+            ("을까", Pos::EF),
+            ("?", Pos::SF),
+        ],
+    );
+
+    assert_analysis(
+        &analyzer,
+        "여기 자리 있어요?",
+        &[
+            ("여기", Pos::NP),
+            ("자리", Pos::NNG),
+            ("있", Pos::VA),
+            ("어요", Pos::EF),
+            ("?", Pos::SF),
+        ],
+    );
+
+    // 대박 캐시 교정(어절 캐시 [대/XPN,박]→[대박/NNG]) 이후 문맥 커플링으로
+    // '실화냐'가 실화+이/VCP+냐(마진 0.58 플립)로 나오는 tradeoff — 골드는 무-VCP.
+    // 핵심 회귀 가드(대박/NNG 유지, 대/XPN 분해 금지)만 부분 검증으로 유지하고
+    // 정확 분석은 아래 #[ignore] 테스트로 분리 (재순위 재학습 시 해결 대상).
+    let result = analyzer.analyze("이거 실화냐 대박");
+    let pairs: Vec<(&str, Pos)> = result.tokens.iter()
+        .map(|t| (t.text.as_str(), t.pos)).collect();
+    assert!(
+        pairs.iter().any(|(t, p)| *t == "대박" && *p == Pos::NNG),
+        "이거 실화냐 대박: 대박/NNG must be preserved: {:?}", pairs
+    );
+    assert!(
+        !pairs.iter().any(|(t, p)| *t == "대" && *p == Pos::XPN),
+        "이거 실화냐 대박: must not split into 대/XPN: {:?}", pairs
+    );
+
+    assert_analysis(
+        &analyzer,
+        "아 진짜 오늘 너무 피곤하다",
+        &[
+            ("아", Pos::IC),
+            ("진짜", Pos::MAG),
+            ("오늘", Pos::MAG),
+            ("너무", Pos::MAG),
+            ("피곤", Pos::NNG),
+            ("하", Pos::XSA),
+            ("다", Pos::EF),
+        ],
+    );
+}
+
+// 대박 캐시 교정의 문맥 커플링으로 '실화냐'가 실화+이/VCP+냐에 밀리던 것을
+// 어절 캐시 [실화,냐/EF] 추가로 복원 — 정확 분석 가드.
+#[test]
+fn test_silhwanya_no_vcp_tradeoff() {
+    let analyzer = load_analyzer();
+
+    assert_analysis(
+        &analyzer,
+        "이거 실화냐 대박",
+        &[
+            ("이거", Pos::NP),
+            ("실화", Pos::NNG),
+            ("냐", Pos::EF),
+            ("대박", Pos::NNG),
+        ],
+    );
+}
+
+// 어절 캐시 낡은 항목([대/XPN,박/NNG])·저빈도 사전 비용·충돌제거 오폭으로
+// 단일 명사가 과분해되던 회귀 가드 (캐시 in-place 교정 + tech_supplement 보정).
+#[test]
+fn test_single_noun_oversegmentation_fixes() {
+    let analyzer = load_analyzer();
+
+    // 캐시 교정: 단독/문두 대박
+    assert_analysis(&analyzer, "대박", &[("대박", Pos::NNG)]);
+    assert_analysis(
+        &analyzer,
+        "대박 났다",
+        &[
+            ("대박", Pos::NNG),
+            ("나", Pos::VV),
+            ("았", Pos::EP),
+            ("다", Pos::EF),
+        ],
+    );
+
+    // supplement freq 보정: 의상실 (freq 3 → 200, 의/JKG+상실 과분해 방지)
+    assert_analysis(&analyzer, "의상실", &[("의상실", Pos::NNG)]);
+    assert_analysis(
+        &analyzer,
+        "의상실에 갔다",
+        &[
+            ("의상실", Pos::NNG),
+            ("에", Pos::JKB),
+            ("가", Pos::VV),
+            ("았", Pos::EP),
+            ("다", Pos::EF),
+        ],
+    );
+
+    // supplement 보호: 의대 (suffix-codebook 충돌 제거가 사전 항목을 삭제하던 케이스)
+    let result = analyzer.analyze("의대 증원을 둘러싼 갈등");
+    let pairs: Vec<(&str, Pos)> = result.tokens.iter()
+        .map(|t| (t.text.as_str(), t.pos)).collect();
+    assert!(
+        pairs.iter().any(|(t, p)| *t == "의대" && *p == Pos::NNG),
+        "의대 증원: 의대/NNG expected: {:?}", pairs
+    );
+}
+
+// ----- Issue #1 (sgbai78) regression suite -----
+
+#[test]
+fn test_issue1_sentence_final_ef_no_punctuation() {
+    let analyzer = load_analyzer();
+
+    // 어/아 EC at sentence end after VV/VA/EP should become EF.
+    // Surface form follows Garu's vowel-harmony rule: 어→아 only when the
+    // preceding syllable's vowel is ㅏ/ㅗ (배고프 ㅡ stays 어, 가 ㅏ becomes 아).
+    assert_analysis(
+        &analyzer,
+        "배고파",
+        &[("배고프", Pos::VA), ("어", Pos::EF)],
+    );
+    assert_analysis(
+        &analyzer,
+        "졸려",
+        &[("졸리", Pos::VV), ("어", Pos::EF)],
+    );
+
+    let result = analyzer.analyze("다 끝났어");
+    let last = result.tokens.last().expect("must have tokens");
+    assert_eq!(last.pos, Pos::EF, "last morpheme must be EF in '다 끝났어'");
+
+    let result = analyzer.analyze("나 이제 가");
+    let last = result.tokens.last().expect("must have tokens");
+    assert_eq!(last.pos, Pos::EF, "last morpheme must be EF in '나 이제 가'");
+}
+
+#[test]
+fn test_issue1_haeyo_endings() {
+    let analyzer = load_analyzer();
+
+    // 어때요 → 어떻/VA + 어요/EF
+    assert_analysis(
+        &analyzer,
+        "어때요",
+        &[("어떻", Pos::VA), ("어요", Pos::EF)],
+    );
+
+    // 감사해요 → 감사/NNG + 하/XSV + 아요/EF (어근 회복)
+    assert_analysis(
+        &analyzer,
+        "감사해요",
+        &[("감사", Pos::NNG), ("하", Pos::XSV), ("아요", Pos::EF)],
+    );
+}
+
+#[test]
+fn test_issue1_mag_copula_ya() {
+    let analyzer = load_analyzer();
+
+    // 별로야 → 별로/MAG + 이/VCP + 야/EF
+    assert_analysis(
+        &analyzer,
+        "별로야",
+        &[("별로", Pos::MAG), ("이", Pos::VCP), ("야", Pos::EF)],
+    );
+}
+
+#[test]
+fn test_issue1_span_arc_guard_eojweo() {
+    let analyzer = load_analyzer();
+
+    // 틀어줘 → 틀/VV + 어/EC + 주/VX + 어/EF (no NNG span)
+    let result = analyzer.analyze("틀어줘");
+    let pos_seq: Vec<Pos> = result.tokens.iter().map(|t| t.pos).collect();
+    assert!(
+        !pos_seq.contains(&Pos::NNG) || result.tokens.len() > 1,
+        "틀어줘 should not be a single NNG span: {:?}",
+        result.tokens.iter().map(|t| (t.text.as_str(), t.pos)).collect::<Vec<_>>()
+    );
+    assert!(
+        result.tokens.iter().any(|t| t.text == "주" && t.pos == Pos::VX),
+        "틀어줘 must contain 주/VX"
+    );
+}
+
+#[test]
+fn test_issue1_jongseong_ss_fallback() {
+    let analyzer = load_analyzer();
+
+    // 갔거든 / 왔거든 / 봤거든: ㅆ jongseong split must reach EP+EF combinations
+    // such as 았거든/었거든 even though `ㅆ거든` is absent from the suffix codebook.
+    assert_analysis(
+        &analyzer,
+        "갔거든",
+        &[("가", Pos::VV), ("았", Pos::EP), ("거든", Pos::EF)],
+    );
+    let result = analyzer.analyze("왔거든");
+    assert!(
+        result.tokens.iter().any(|t| t.text == "오" && matches!(t.pos, Pos::VV | Pos::VX)),
+        "왔거든 must contain 오 stem: {:?}",
+        result.tokens.iter().map(|t| (t.text.as_str(), t.pos)).collect::<Vec<_>>()
+    );
+    assert!(result.tokens.iter().any(|t| t.text == "거든" && t.pos == Pos::EF));
+}
+
+#[test]
+fn test_issue1_han_standalone_mm() {
+    let analyzer = load_analyzer();
+
+    // 노래 한 곡 틀어줘 → 한/MM (not 하/XSV+ㄴ/ETM cross-eojeol)
+    let result = analyzer.analyze("노래 한 곡 틀어줘");
+    let han_token = result.tokens.iter().find(|t| t.text == "한")
+        .expect("expected 한 token");
+    assert_eq!(han_token.pos, Pos::MM);
+
+    // 한 명 / 한 대
+    let result = analyzer.analyze("한 명");
+    assert_eq!(result.tokens[0].text, "한");
+    assert_eq!(result.tokens[0].pos, Pos::MM);
+    let result = analyzer.analyze("한 대");
+    assert_eq!(result.tokens[0].text, "한");
+    assert_eq!(result.tokens[0].pos, Pos::MM);
+
+    // Regression: multi-syllable XX한 must keep XSV+ETM
+    let result = analyzer.analyze("공부한 사람");
+    assert!(result.tokens.iter().any(|t| t.text == "하" && t.pos == Pos::XSV));
+    assert!(result.tokens.iter().any(|t| t.text == "ㄴ" && t.pos == Pos::ETM));
+}
+
+#[test]
+fn test_issue1_myeoch_si_ya() {
+    let analyzer = load_analyzer();
+
+    // 몇 + 시야 (sentence-final) → 시/NNB + 이/VCP + 야/EF
+    let result = analyzer.analyze("지금 몇 시야");
+    let last3: Vec<(&str, Pos)> = result.tokens.iter().rev().take(3)
+        .map(|t| (t.text.as_str(), t.pos)).collect();
+    assert_eq!(last3[0], ("야", Pos::EF));
+    assert_eq!(last3[1], ("이", Pos::VCP));
+    assert_eq!(last3[2], ("시", Pos::NNB));
+
+    // With SF
+    let result = analyzer.analyze("몇 시야?");
+    assert!(result.tokens.iter().any(|t| t.text == "시" && t.pos == Pos::NNB));
+    assert!(result.tokens.iter().any(|t| t.pos == Pos::VCP));
+
+    // Regression: 시야 (sight) must be preserved when not after 몇
+    let result = analyzer.analyze("내 시야가 좁다");
+    assert!(result.tokens.iter().any(|t| t.text == "시야" && t.pos == Pos::NNG));
+}
+
+#[test]
+fn test_issue1_sn_unit_copula() {
+    let analyzer = load_analyzer();
+
+    // 24.7도예요 → 24.7/SN + 도/NNB + 이/VCP + 예요/EF (도예/NNG span 거부)
+    let result = analyzer.analyze("24.7도예요");
+    let texts: Vec<&str> = result.tokens.iter().map(|t| t.text.as_str()).collect();
+    assert!(
+        !texts.contains(&"도예"),
+        "24.7도예요 must not contain 도예/NNG span: {:?}",
+        result.tokens.iter().map(|t| (t.text.as_str(), t.pos)).collect::<Vec<_>>()
+    );
+    assert!(
+        result.tokens.iter().any(|t| t.text == "도" && t.pos == Pos::NNB),
+        "24.7도예요 must contain 도/NNB"
+    );
+    assert!(
+        result.tokens.iter().any(|t| t.pos == Pos::VCP),
+        "24.7도예요 must contain a VCP morpheme"
+    );
+
+    // 3개예요 (regression: must keep working)
+    assert_analysis(
+        &analyzer,
+        "3개예요",
+        &[("3", Pos::SN), ("개", Pos::NNB), ("이", Pos::VCP), ("예요", Pos::EF)],
+    );
+}
+
+#[test]
+fn test_issue2_lge_monosyllable_ha() {
+    // 할게 → 하/VV + ㄹ게/EF (의존명사 분해 거부)
+    let analyzer = load_analyzer();
+    let result = analyzer.analyze("할게");
+    let texts: Vec<&str> = result.tokens.iter().map(|t| t.text.as_str()).collect();
+    assert!(
+        !texts.contains(&"거"),
+        "할게 must not decompose to 거/NNB: {:?}",
+        result.tokens.iter().map(|t| (t.text.as_str(), t.pos)).collect::<Vec<_>>()
+    );
+    assert!(
+        result.tokens.iter().any(|t| t.text == "ㄹ게" && t.pos == Pos::EF),
+        "할게 must end with ㄹ게/EF"
+    );
+
+    // 내가 할게 (sentence-level)
+    let result = analyzer.analyze("내가 할게");
+    assert!(
+        result.tokens.iter().any(|t| t.text == "ㄹ게" && t.pos == Pos::EF),
+        "내가 할게 must end with ㄹ게/EF"
+    );
+}
+
+#[test]
+fn test_issue2_lge_monosyllable_l_jongseong() {
+    // 살게/갈게/들게 → X/VV + ㄹ게/EF (EC 거부, ㄹ받침 단음절 어간)
+    let analyzer = load_analyzer();
+    for input in ["내가 살게", "내가 갈게", "내가 들게"] {
+        let result = analyzer.analyze(input);
+        let pairs: Vec<(&str, Pos)> = result.tokens.iter()
+            .map(|t| (t.text.as_str(), t.pos)).collect();
+        assert!(
+            result.tokens.iter().any(|t| t.text == "ㄹ게" && t.pos == Pos::EF),
+            "{} must end with ㄹ게/EF, got: {:?}", input, pairs
+        );
+    }
+}
+
+#[test]
+fn test_issue2_lge_monosyllable_eul() {
+    // 먹을게 → 먹/VV + 을게/EF (의존명사 분해 거부)
+    let analyzer = load_analyzer();
+    let result = analyzer.analyze("먹을게");
+    let pairs: Vec<(&str, Pos)> = result.tokens.iter()
+        .map(|t| (t.text.as_str(), t.pos)).collect();
+    assert!(
+        !pairs.iter().any(|(t, _)| *t == "거"),
+        "먹을게 must not decompose to 거/NNB: {:?}", pairs
+    );
+    assert!(
+        result.tokens.iter().any(|t| t.text == "을게" && t.pos == Pos::EF),
+        "먹을게 must end with 을게/EF"
+    );
+
+    // Regression: existing 받을게/씻을게 still work
+    for input in ["받을게", "씻을게", "앉을게"] {
+        let result = analyzer.analyze(input);
+        assert!(
+            result.tokens.iter().any(|t| t.text == "을게" && t.pos == Pos::EF),
+            "{} must end with 을게/EF", input
+        );
+    }
+}
+
+#[test]
+fn test_issue2_iri_mag_demotion() {
+    let analyzer = load_analyzer();
+
+    // 이리 단독 → MAG (NNP 거부)
+    let result = analyzer.analyze("이리");
+    assert!(
+        result.tokens.iter().any(|t| t.text == "이리" && t.pos == Pos::MAG),
+        "이리 단독은 MAG여야 함: {:?}",
+        result.tokens.iter().map(|t| (t.text.as_str(), t.pos)).collect::<Vec<_>>()
+    );
+
+    // 이리 와 → 이리/MAG + 오/VV + 아/EF (와/JKB 거부)
+    let result = analyzer.analyze("이리 와");
+    let pairs: Vec<(&str, Pos)> = result.tokens.iter()
+        .map(|t| (t.text.as_str(), t.pos)).collect();
+    assert!(
+        pairs.iter().any(|(t, p)| *t == "이리" && *p == Pos::MAG),
+        "이리 와 → 이리/MAG: {:?}", pairs
+    );
+    assert!(
+        !pairs.iter().any(|(t, p)| *t == "와" && *p == Pos::JKB),
+        "이리 와 must not have 와/JKB: {:?}", pairs
+    );
+
+    // 이리 와봐 → 이리/MAG ...
+    let result = analyzer.analyze("이리 와봐");
+    assert!(
+        result.tokens.iter().any(|t| t.text == "이리" && t.pos == Pos::MAG),
+        "이리 와봐 → 이리/MAG"
+    );
+}
+
+#[test]
+fn test_issue2_oneora_recovery() {
+    let analyzer = load_analyzer();
+
+    // 오너라 단독 → 오/VV + 너라/EF (오너/NNG span 거부)
+    let result = analyzer.analyze("오너라");
+    let pairs: Vec<(&str, Pos)> = result.tokens.iter()
+        .map(|t| (t.text.as_str(), t.pos)).collect();
+    assert!(
+        !pairs.iter().any(|(t, _)| *t == "오너"),
+        "오너라 must not contain 오너 span: {:?}", pairs
+    );
+    assert!(
+        result.tokens.iter().any(|t| t.text == "너라" && t.pos == Pos::EF),
+        "오너라 must end with 너라/EF"
+    );
+
+    // 이리 오너라 → 이리/MAG + 오/VV + 너라/EF
+    let result = analyzer.analyze("이리 오너라");
+    let pairs: Vec<(&str, Pos)> = result.tokens.iter()
+        .map(|t| (t.text.as_str(), t.pos)).collect();
+    assert_eq!(
+        pairs,
+        vec![("이리", Pos::MAG), ("오", Pos::VV), ("너라", Pos::EF)],
+        "이리 오너라 분석 불일치"
+    );
+
+    // Regression: 회사 오너 (proper noun usage) must be preserved
+    let result = analyzer.analyze("회사 오너가 와");
+    assert!(
+        result.tokens.iter().any(|t| t.text == "오너" && t.pos == Pos::NNG),
+        "회사 오너가 와: 오너/NNG must be preserved"
+    );
+}
+
+#[test]
+fn test_noun_inga_copula_split() {
+    let analyzer = load_analyzer();
+
+    // 눈물인가 (eojeol-final, no punctuation) → 눈물/NNG + 이/VCP + ㄴ가/EF
+    let result = analyzer.analyze("눈물인가");
+    let pairs: Vec<(&str, Pos)> = result.tokens.iter()
+        .map(|t| (t.text.as_str(), t.pos)).collect();
+    assert!(
+        pairs.iter().any(|(t, p)| *t == "이" && *p == Pos::VCP),
+        "눈물인가 must split into 이/VCP: {:?}", pairs
+    );
+    assert!(
+        pairs.iter().any(|(t, p)| *t == "ㄴ가" && *p == Pos::EF),
+        "눈물인가 must split into ㄴ가/EF: {:?}", pairs
+    );
+    assert!(
+        !pairs.iter().any(|(t, p)| *t == "인가" && *p == Pos::NNG),
+        "눈물인가 must not keep 인가/NNG: {:?}", pairs
+    );
+
+    // 학생인가 선생인가 → both 인가 split
+    let result = analyzer.analyze("학생인가 선생인가");
+    let pairs: Vec<(&str, Pos)> = result.tokens.iter()
+        .map(|t| (t.text.as_str(), t.pos)).collect();
+    let vcp_count = pairs.iter().filter(|(t, p)| *t == "이" && *p == Pos::VCP).count();
+    let ef_count = pairs.iter().filter(|(t, p)| *t == "ㄴ가" && *p == Pos::EF).count();
+    assert_eq!(vcp_count, 2, "학생인가 선생인가: expected 2 VCP, got {:?}", pairs);
+    assert_eq!(ef_count, 2, "학생인가 선생인가: expected 2 EF, got {:?}", pairs);
+
+    // Regression: already-correct case with SF punctuation should remain correct
+    let result = analyzer.analyze("여기가 학교인가?");
+    let pairs: Vec<(&str, Pos)> = result.tokens.iter()
+        .map(|t| (t.text.as_str(), t.pos)).collect();
+    assert!(
+        pairs.iter().any(|(t, p)| *t == "이" && *p == Pos::VCP),
+        "여기가 학교인가?: still produces 이/VCP: {:?}", pairs
+    );
+    assert!(
+        pairs.iter().any(|(t, p)| *t == "ㄴ가" && *p == Pos::EF),
+        "여기가 학교인가?: still produces ㄴ가/EF: {:?}", pairs
+    );
+}
+
+// 재순위 perceptron이 rank1(인가/NNG 認可)을 이/VCP+ㄴ가/EF로 뒤집는
+// wrong-override 케이스. 이 플립 클래스(content→기능어 분해)는 v15k 전체로는
+// 순이익(+1.66 문장F1, improved 11 vs worsened 1)이라 가드 차단은 순손실 —
+// 재순위 재학습에서 해결 대상 (research-history #37). Section 14 없는 모델에선 통과.
+#[test]
+#[ignore = "재순위 wrong-override 잔존 케이스 — 재학습 시 해결 (research-history #37)"]
+fn test_noun_inga_real_noun_rerank_tradeoff() {
+    let analyzer = load_analyzer();
+
+    // real noun 인가 (認可) followed by JKS must stay NNG
+    let result = analyzer.analyze("조선시대 인가가 필요하다");
+    let pairs: Vec<(&str, Pos)> = result.tokens.iter()
+        .map(|t| (t.text.as_str(), t.pos)).collect();
+    assert!(
+        pairs.iter().any(|(t, p)| *t == "인가" && *p == Pos::NNG),
+        "조선시대 인가가: 인가/NNG (real noun) must be preserved: {:?}", pairs
+    );
+    assert!(
+        !pairs.iter().any(|(t, p)| *t == "ㄴ가" && *p == Pos::EF),
+        "조선시대 인가가: must not produce ㄴ가/EF: {:?}", pairs
+    );
+}
+
+#[test]
+fn test_vcp_eojeol_start_recovery_inji() {
+    let analyzer = load_analyzer();
+
+    // 인지 능력 — eojeol-start NNG (compound across eojeol)
+    let result = analyzer.analyze("인지 능력이 떨어진다");
+    let pairs: Vec<(&str, Pos)> = result.tokens.iter()
+        .map(|t| (t.text.as_str(), t.pos)).collect();
+    assert!(
+        pairs.iter().any(|(t, p)| *t == "인지" && *p == Pos::NNG),
+        "인지 능력: 인지/NNG: {:?}", pairs
+    );
+    assert!(
+        !(pairs.first() == Some(&("이", Pos::VCP))),
+        "인지 능력: 어절 시작이 이/VCP면 안 됨: {:?}", pairs
+    );
+
+    // 인지능력 — same eojeol compound
+    let result = analyzer.analyze("인지능력이 떨어진다");
+    let pairs: Vec<(&str, Pos)> = result.tokens.iter()
+        .map(|t| (t.text.as_str(), t.pos)).collect();
+    assert!(
+        pairs.iter().any(|(t, p)| *t == "인지" && *p == Pos::NNG),
+        "인지능력: 인지/NNG: {:?}", pairs
+    );
+
+    // 인지하다 — eojeol-start NNG + 파생동사
+    let result = analyzer.analyze("인지하다");
+    let pairs: Vec<(&str, Pos)> = result.tokens.iter()
+        .map(|t| (t.text.as_str(), t.pos)).collect();
+    assert!(
+        pairs.iter().any(|(t, p)| *t == "인지" && *p == Pos::NNG),
+        "인지하다: 인지/NNG: {:?}", pairs
+    );
+
+    // 치매 환자의 인지 — eojeol-end position
+    let result = analyzer.analyze("치매 환자의 인지");
+    let pairs: Vec<(&str, Pos)> = result.tokens.iter()
+        .map(|t| (t.text.as_str(), t.pos)).collect();
+    assert!(
+        pairs.iter().any(|(t, p)| *t == "인지" && *p == Pos::NNG),
+        "치매 환자의 인지: 인지/NNG: {:?}", pairs
+    );
+
+    // Regression — true copula context (이게 학생인지 모른다)
+    let result = analyzer.analyze("이게 학생인지 모른다");
+    let pairs: Vec<(&str, Pos)> = result.tokens.iter()
+        .map(|t| (t.text.as_str(), t.pos)).collect();
+    assert!(
+        pairs.iter().any(|(t, p)| *t == "학생" && *p == Pos::NNG),
+        "학생인지: 학생/NNG preserved: {:?}", pairs
+    );
+    assert!(
+        pairs.iter().any(|(t, p)| *t == "이" && *p == Pos::VCP),
+        "학생인지: copula 이/VCP preserved: {:?}", pairs
+    );
+    assert!(
+        pairs.iter().any(|(t, p)| *t == "ㄴ지" && *p == Pos::EC),
+        "학생인지: ㄴ지/EC preserved: {:?}", pairs
+    );
+    assert!(
+        !pairs.iter().any(|(t, p)| *t == "인지" && *p == Pos::NNG),
+        "학생인지: 인지/NNG로 잘못 병합되면 안 됨: {:?}", pairs
+    );
+
+    // Regression — different ending (는지) on a verb stem
+    let result = analyzer.analyze("맞는지 모르겠다");
+    let pairs: Vec<(&str, Pos)> = result.tokens.iter()
+        .map(|t| (t.text.as_str(), t.pos)).collect();
+    assert!(
+        pairs.iter().any(|(t, p)| *t == "맞" && *p == Pos::VV),
+        "맞는지: 맞/VV preserved: {:?}", pairs
+    );
+}
+
+#[test]
+fn test_vcp_eojeol_start_recovery_imyon() {
+    let analyzer = load_analyzer();
+
+    // 이면 분석 — eojeol-start NNG (compound across eojeol)
+    let result = analyzer.analyze("이면 분석이 필요하다");
+    let pairs: Vec<(&str, Pos)> = result.tokens.iter()
+        .map(|t| (t.text.as_str(), t.pos)).collect();
+    assert!(
+        pairs.iter().any(|(t, p)| *t == "이면" && *p == Pos::NNG),
+        "이면 분석: 이면/NNG: {:?}", pairs
+    );
+
+    // 동전의 이면 — eojeol-end position
+    let result = analyzer.analyze("동전의 이면");
+    let pairs: Vec<(&str, Pos)> = result.tokens.iter()
+        .map(|t| (t.text.as_str(), t.pos)).collect();
+    assert!(
+        pairs.iter().any(|(t, p)| *t == "이면" && *p == Pos::NNG),
+        "동전의 이면: 이면/NNG: {:?}", pairs
+    );
+
+    // 이면을, 이면이 — eojeol-start (이/MM + 면/NNG 경로)
+    let result = analyzer.analyze("이면을 보다");
+    let pairs: Vec<(&str, Pos)> = result.tokens.iter()
+        .map(|t| (t.text.as_str(), t.pos)).collect();
+    assert!(
+        pairs.iter().any(|(t, p)| *t == "이면" && *p == Pos::NNG),
+        "이면을: 이면/NNG: {:?}", pairs
+    );
+
+    let result = analyzer.analyze("이면이 드러나다");
+    let pairs: Vec<(&str, Pos)> = result.tokens.iter()
+        .map(|t| (t.text.as_str(), t.pos)).collect();
+    assert!(
+        pairs.iter().any(|(t, p)| *t == "이면" && *p == Pos::NNG),
+        "이면이: 이면/NNG: {:?}", pairs
+    );
+
+    // Regression — true copula+조건어미 (내일이면, 학생이면)
+    let result = analyzer.analyze("내일이면 도착한다");
+    let pairs: Vec<(&str, Pos)> = result.tokens.iter()
+        .map(|t| (t.text.as_str(), t.pos)).collect();
+    assert!(
+        pairs.iter().any(|(t, p)| *t == "내일" && *p == Pos::NNG),
+        "내일이면: 내일/NNG preserved: {:?}", pairs
+    );
+    assert!(
+        pairs.iter().any(|(t, p)| *t == "이" && *p == Pos::VCP),
+        "내일이면: 이/VCP preserved: {:?}", pairs
+    );
+    assert!(
+        pairs.iter().any(|(t, p)| *t == "면" && *p == Pos::EC),
+        "내일이면: 면/EC preserved: {:?}", pairs
+    );
+    assert!(
+        !pairs.iter().any(|(t, p)| *t == "이면" && *p == Pos::NNG),
+        "내일이면: 이면/NNG으로 잘못 병합되면 안 됨: {:?}", pairs
+    );
+
+    let result = analyzer.analyze("학생이면 누구나");
+    let pairs: Vec<(&str, Pos)> = result.tokens.iter()
+        .map(|t| (t.text.as_str(), t.pos)).collect();
+    assert!(
+        pairs.iter().any(|(t, p)| *t == "이" && *p == Pos::VCP),
+        "학생이면: 이/VCP preserved: {:?}", pairs
+    );
+    assert!(
+        !pairs.iter().any(|(t, p)| *t == "이면" && *p == Pos::NNG),
+        "학생이면: 이면/NNG으로 잘못 병합되면 안 됨: {:?}", pairs
+    );
+}
+
+#[test]
+fn test_no_truncated_codebook_hallucination() {
+    // 접미사 코드북의 절단된 키(배→[배우,었], 조→[조사,되,었])가 span을 넘는
+    // 표면을 주입해 "출력 표면 ≠ 입력"을 만드는 정합성 버그 방지.
+    // "2.2배다."는 2.2/SN + 배/NNG (+다) 여야 하며, 입력에 없는 배출/조사 등을
+    // 절대 만들면 안 된다.
+    let analyzer = load_analyzer();
+    for (input, forbidden) in [
+        ("2.2배다.", "배출"),
+        ("3배다.", "배출"),
+    ] {
+        let r = analyzer.analyze(input);
+        let pairs: Vec<(&str, Pos)> = r.tokens.iter()
+            .map(|t| (t.text.as_str(), t.pos)).collect();
+        assert!(
+            !r.tokens.iter().any(|t| t.text == forbidden),
+            "{input}: 절단 코드북 키로 인한 환각 '{forbidden}' 발생: {:?}", pairs
+        );
+        assert!(
+            r.tokens.iter().any(|t| t.text == "배" && t.pos == Pos::NNG),
+            "{input}: 올바른 배/NNG 있어야 함: {:?}", pairs
+        );
+    }
+}
+
+#[test]
+fn test_gae_verb_vs_counter() {
+    // 개다(이불을 개다/날이 개다)가 사전에 없어 개/NNB(단위명사)로만 붕괴하던 것을
+    // HOMOGRAPH_VERB_DUAL 등재로 수리. 수사 선행 문맥의 단위명사 읽기는 보존돼야 한다.
+    let analyzer = load_analyzer();
+    for (input, form, pos) in [
+        ("이불 개라.", "개", Pos::VV),
+        ("비 갠 후 하늘이 맑았다.", "개", Pos::VV),
+        ("빨래를 개서 넣었다", "개", Pos::VV),
+        ("사과 세 개를 먹었다", "개", Pos::NNB),
+        ("문제는 두 개라고 했다", "개", Pos::NNB),
+        ("3개가 남았다", "개", Pos::NNB),
+    ] {
+        let pairs = surface_pos(&analyzer, input);
+        assert!(
+            pairs.iter().any(|(t, p)| t == form && *p == pos),
+            "{input}: {form}/{pos:?} 여야 함: {pairs:?}"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 런타임 사용자 사전
+// ---------------------------------------------------------------------------
+
+fn surface_pos(analyzer: &Analyzer, text: &str) -> Vec<(String, Pos)> {
+    analyzer.analyze(text).tokens.into_iter().map(|t| (t.text, t.pos)).collect()
+}
+
+#[test]
+fn test_user_word_merges_compound() {
+    let mut analyzer = load_analyzer();
+
+    // 기본 사전에는 없어 과분해된다.
+    let before = surface_pos(&analyzer, "탄소중립 목표");
+    assert!(
+        !before.iter().any(|(s, _)| s == "탄소중립"),
+        "precondition: 탄소중립 should be split without a user word, got {:?}",
+        before
+    );
+
+    analyzer.add_user_word("탄소중립", Pos::NNG, None);
+    let after = surface_pos(&analyzer, "탄소중립 목표");
+    assert!(
+        after.contains(&("탄소중립".to_string(), Pos::NNG)),
+        "user word should win, got {:?}",
+        after
+    );
+    // 나머지 어절은 그대로여야 한다.
+    assert!(after.contains(&("목표".to_string(), Pos::NNG)), "got {:?}", after);
+}
+
+#[test]
+fn test_user_word_absent_is_byte_identical() {
+    let baseline = load_analyzer();
+    let mut with_dict = load_analyzer();
+    with_dict.add_user_word("탄소중립", Pos::NNG, None);
+    with_dict.clear_user_words();
+
+    for text in [
+        "나는 학교에서 공부했다",
+        "탄소중립 목표",
+        "아버지가 방에 들어가신다",
+        "무선 이어폰 추천",
+    ] {
+        assert_eq!(surface_pos(&baseline, text), surface_pos(&with_dict, text),
+                   "clearing user words must restore baseline behaviour: {text}");
+    }
+}
+
+#[test]
+fn test_user_word_does_not_cross_whitespace() {
+    let mut analyzer = load_analyzer();
+    analyzer.add_user_word("중립목표", Pos::NNG, None);
+    let out = surface_pos(&analyzer, "탄소중립 목표");
+    assert!(
+        !out.iter().any(|(s, _)| s == "중립목표"),
+        "a user word must not span a space, got {:?}",
+        out
+    );
+}
+
+/// 공백을 포함한 다어절 고유명사의 span이 첫 어절로 잘리지 않아야 한다.
+/// 이전에는 `여수 밤바다/NNP`가 [0:2](="여수")로 잘렸다.
+#[test]
+fn test_multiword_nnp_span_not_truncated() {
+    let analyzer = load_analyzer();
+    let text = "여수 밤바다 진짜 이쁘다";
+    let r = analyzer.analyze(text);
+    let nnp = r.tokens.iter()
+        .find(|t| t.text.contains(' '))
+        .expect("다어절 고유명사 토큰이 있어야 한다");
+    let surface_len = nnp.text.chars().count();
+    assert!(
+        nnp.end - nnp.start >= surface_len,
+        "span [{}:{}]이 표면 {}자보다 짧다: {}",
+        nnp.start, nnp.end, surface_len, nnp.text
+    );
+}
