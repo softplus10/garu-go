@@ -71,7 +71,7 @@ dependencies = [
 
 [[package]]
 name = "garu-core"
-version = "0.9.18"
+version = "0.10.0"
 dependencies = [
  "brotli-decompressor",
  "fst",
@@ -81,7 +81,7 @@ dependencies = [
 
 [[package]]
 name = "garu-go-ffi"
-version = "0.9.18"
+version = "0.10.0"
 dependencies = [
  "garu-core",
  "serde",
