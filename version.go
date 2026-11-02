@@ -1,7 +1,7 @@
 package garu
 
 // Version matches the upstream Garu tag.
-const Version = "0.10.0"
+const Version = "0.11.0"
 
 // UpstreamCommit identifies the unmodified Rust core and bundled model.
-const UpstreamCommit = "305d3c1b90833fe6ef36a9ef14ccd3efe1d246ce"
+const UpstreamCommit = "cfe930583f75e80771aae1e22310359960e0aebb"
